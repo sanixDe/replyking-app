@@ -1,5 +1,7 @@
 import { ReplyTone, AnalysisResult, GeneratedReply } from '../types';
 import { performanceService } from './performanceService';
+import { env, config } from '../config/environment';
+import { cacheService } from './cacheService';
 
 export class GeminiService {
   private static instance: GeminiService;
@@ -9,8 +11,8 @@ export class GeminiService {
 
   private constructor() {
     this.apiKey = process.env.REACT_APP_GEMINI_API_KEY || null;
-    this.model = process.env.REACT_APP_GEMINI_MODEL || 'gemini-2.5-flash';
-    this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
+    this.model = env.geminiModel;
+    this.baseUrl = `${env.apiBaseUrl}/v1beta/models/${this.model}:generateContent`;
   }
 
   public static getInstance(): GeminiService {
@@ -130,6 +132,7 @@ ANALYSIS STEPS:
 4. Determine the relationship dynamic (friends, romantic, professional, family, etc.)
 5. Consider the conversation mood and energy level
 6. Generate replies that fit naturally into this specific conversation as the RIGHT SIDE person
+7. Make the replies sound like a genz person
 
 TONE GUIDELINES:
 ${toneGuidelines}
@@ -258,6 +261,14 @@ If the screenshot is unclear or unreadable:
       throw new Error('Gemini API key not configured');
     }
 
+    // Check cache first
+    const cacheKey = `analysis_${imageFile.name}_${tone}`;
+    const cachedResult = cacheService.get<AnalysisResult>(cacheKey);
+    if (cachedResult) {
+      console.log('Using cached analysis result');
+      return cachedResult;
+    }
+
     // Track performance
     return performanceService.trackApiCall(async () => {
       try {
@@ -318,8 +329,13 @@ If the screenshot is unclear or unreadable:
 
         const responseText = data.candidates[0].content.parts[0].text;
         
-        // Parse and return result
-        return this.parseGeminiResponse(responseText);
+        // Parse result
+        const result = this.parseGeminiResponse(responseText);
+        
+        // Cache the result
+        cacheService.set(cacheKey, result, 300000); // 5 minutes
+        
+        return result;
         
       } catch (error) {
         if (error instanceof Error) {

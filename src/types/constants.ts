@@ -3,7 +3,7 @@ import { FileConstraints } from './index';
 // File upload constraints
 export const FILE_CONSTRAINTS: FileConstraints = {
   maxSize: 10 * 1024 * 1024, // 10MB
-  allowedTypes: ['image/jpeg', 'image/jpg', 'image/png'],
+  allowedTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/heic', 'image/heif'],
   maxFiles: 1
 };
 

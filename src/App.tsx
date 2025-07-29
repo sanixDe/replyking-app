@@ -3,6 +3,8 @@ import { MessageSquare, RefreshCw, AlertCircle, Settings, HelpCircle } from 'luc
 import { ReplyTone, AnalysisResult } from './types';
 import { geminiService } from './services/geminiService';
 import { analyticsService } from './services/analyticsService';
+import { enhancedAnalyticsService } from './services/enhancedAnalyticsService';
+import { cacheService } from './services/cacheService';
 import { useToast } from './hooks/useToast';
 import ErrorBoundary from './components/ErrorBoundary';
 import Toast from './components/Toast';
@@ -11,6 +13,10 @@ import ImageUpload from './components/ImageUpload';
 import ToneSelector from './components/ToneSelector';
 import ReplyResults from './components/ReplyResults';
 import InstallPrompt from './components/InstallPrompt';
+import NetworkStatus from './components/NetworkStatus';
+import LoadingSpinner from './components/LoadingSpinner';
+import TouchButton from './components/TouchButton';
+import Onboarding from './components/Onboarding';
 
 function App() {
   // State management
@@ -23,14 +29,35 @@ function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [isFirstVisit, setIsFirstVisit] = useState(false);
 
   // Toast notifications
   const { toasts, removeToast, success, error: showError } = useToast();
 
-  // Initialize analytics
+  // Initialize analytics and check first visit
   useEffect(() => {
     analyticsService.initialize();
     analyticsService.trackPageView('/');
+    enhancedAnalyticsService.trackSessionStart();
+    
+    // Check if this is the first visit
+    const hasVisited = cacheService.getPreference('has_visited', false);
+    if (!hasVisited) {
+      setIsFirstVisit(true);
+      setShowOnboarding(true);
+      cacheService.setPreference('has_visited', true);
+    }
+    
+    // Cleanup cache periodically
+    const cleanupInterval = setInterval(() => {
+      cacheService.cleanup();
+    }, 300000); // Every 5 minutes
+    
+    return () => {
+      clearInterval(cleanupInterval);
+      enhancedAnalyticsService.trackSessionEnd();
+    };
   }, []);
 
   // Check API configuration on mount
@@ -70,6 +97,7 @@ function App() {
     
     // Track analytics
     analyticsService.trackImageUpload();
+    enhancedAnalyticsService.trackUserInteraction('image_upload', 'ImageUpload');
     success('Screenshot uploaded successfully!');
   }, [success]);
 
@@ -78,8 +106,11 @@ function App() {
     setSelectedTone(tone);
     setError(null);
     
-    // Track analytics
+    // Track analytics and cache preference
     analyticsService.trackToneSelection(tone);
+    enhancedAnalyticsService.trackUserInteraction('tone_selection', 'ToneSelector');
+    enhancedAnalyticsService.trackUserPreference('preferred_tone', tone);
+    cacheService.setPreference('last_used_tone', tone);
     success(`Selected ${tone.toLowerCase()} tone`);
   }, [success]);
 
@@ -98,6 +129,7 @@ function App() {
     
     // Track analytics
     analyticsService.trackAnalysisStart();
+    enhancedAnalyticsService.trackUserInteraction('analysis_start', 'AnalyzeButton');
 
     try {
       const result = await geminiService.analyzeImageAndGenerateReplies(
@@ -107,9 +139,15 @@ function App() {
       
       setAnalysisResult(result);
       
-      // Track completion
+      // Track completion and cache result
       const duration = Date.now() - (analysisStartTime || Date.now());
       analyticsService.trackAnalysisComplete(duration);
+      enhancedAnalyticsService.trackApiCall('gemini_analysis', duration, true);
+      enhancedAnalyticsService.trackUserInteraction('analysis_complete', 'ReplyResults');
+      
+      // Cache the result for potential reuse
+      cacheService.setApiResponse('analysis', { file: selectedFile.name, tone: selectedTone }, result, 300000); // 5 minutes
+      
       success('Replies generated successfully!');
       
     } catch (err) {
@@ -117,6 +155,8 @@ function App() {
       setError(errorMessage);
       showError(errorMessage);
       analyticsService.trackError(errorMessage);
+      enhancedAnalyticsService.trackError(err instanceof Error ? err : new Error(String(err)));
+      enhancedAnalyticsService.trackApiCall('gemini_analysis', Date.now() - (analysisStartTime || Date.now()), false, errorMessage);
       console.error('Analysis error:', err);
     } finally {
       setIsAnalyzing(false);
@@ -389,12 +429,21 @@ function App() {
           onClose={() => setShowHelp(false)}
         />
 
+        {/* Network Status */}
+        <NetworkStatus />
+
         {/* Install Prompt */}
         {showInstallPrompt && (
           <InstallPrompt
             onClose={() => setShowInstallPrompt(false)}
           />
         )}
+
+        {/* Onboarding */}
+        <Onboarding
+          isOpen={showOnboarding}
+          onClose={() => setShowOnboarding(false)}
+        />
       </div>
     </ErrorBoundary>
   );

@@ -29,14 +29,16 @@ export class FileValidationService {
       };
     }
 
-    // Check file type
-    if (!FILE_CONSTRAINTS.allowedTypes.includes(file.type)) {
-      const allowedTypes = FILE_CONSTRAINTS.allowedTypes
+    // Check file type (including HEIC support)
+    const allowedTypes = [...FILE_CONSTRAINTS.allowedTypes, 'image/heic', 'image/heif'];
+    if (!allowedTypes.includes(file.type)) {
+      const displayTypes = allowedTypes
         .map(type => type.split('/')[1].toUpperCase())
+        .filter(type => type !== 'HEIC' && type !== 'HEIF') // Don't show HEIC in error message
         .join(', ');
       return { 
         isValid: false, 
-        error: `File type must be one of: ${allowedTypes}` 
+        error: `File type must be one of: ${displayTypes} (iPhone photos are automatically converted)` 
       };
     }
 

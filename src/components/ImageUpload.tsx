@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { Upload, Camera, X, Image as ImageIcon, AlertCircle, CheckCircle } from 'lucide-react';
-import { fileValidationService } from '../services/fileValidationService';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Upload, Camera, X, Image as ImageIcon, AlertCircle, CheckCircle, Smartphone } from 'lucide-react';
+
 import { processImageForIphone, validateIphoneImage, createImagePreview } from '../utils/imageProcessing';
 
 interface ImageUploadProps {
@@ -8,6 +8,13 @@ interface ImageUploadProps {
   isUploading?: boolean;
   maxSizeMB?: number;
   acceptedFormats?: string[];
+}
+
+interface DeviceInfo {
+  isIOS: boolean;
+  isSafari: boolean;
+  isChrome: boolean;
+  userAgent: string;
 }
 
 const ImageUpload: React.FC<ImageUploadProps> = ({
@@ -21,32 +28,80 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // Process selected file
+  // Detect device and browser
+  useEffect(() => {
+    const userAgent = navigator.userAgent;
+    const isIOS = /iPad|iPhone|iPod/.test(userAgent);
+    const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
+    const isChrome = /Chrome/.test(userAgent);
+
+    setDeviceInfo({
+      isIOS,
+      isSafari,
+      isChrome,
+      userAgent
+    });
+
+    // Log device info for debugging
+    console.log('Device Info:', {
+      isIOS,
+      isSafari,
+      isChrome,
+      userAgent
+    });
+  }, []);
+
+  // Add debug log
+  const addDebugLog = useCallback((message: string) => {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}`;
+    console.log(logMessage);
+    setDebugInfo(prev => [...prev.slice(-9), logMessage]); // Keep last 10 logs
+  }, []);
+
+  // Process selected file with comprehensive logging
   const processFile = async (file: File) => {
     setIsProcessing(true);
     setError(null);
 
+    addDebugLog(`Processing file: ${file.name} (${file.type}, ${file.size} bytes)`);
+
     try {
+      // Log file properties
+      addDebugLog(`File properties: name="${file.name}", type="${file.type}", size=${file.size}, lastModified=${file.lastModified}`);
+
       // Validate file for iPhone compatibility
       const validation = validateIphoneImage(file);
+      addDebugLog(`Validation result: ${validation.isValid ? 'PASS' : 'FAIL'} - ${validation.error || 'No error'}`);
+      
       if (!validation.isValid) {
         throw new Error(validation.error || 'Invalid file');
       }
 
       // Process image for iPhone compatibility
+      addDebugLog('Starting image processing...');
       const processedResult = await processImageForIphone(file, maxSizeMB);
+      addDebugLog(`Processing complete: ${processedResult.processedSize} bytes (${((processedResult.processedSize / processedResult.originalSize) * 100).toFixed(1)}% of original)`);
 
       // Create preview
+      addDebugLog('Creating image preview...');
       const previewUrl = await createImagePreview(processedResult.file);
+      addDebugLog('Preview created successfully');
 
       setPreviewUrl(previewUrl);
       setSelectedFile(processedResult.file);
       onImageSelect(processedResult.file);
 
+      addDebugLog('File processing completed successfully');
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to process image';
+      addDebugLog(`ERROR: ${errorMessage}`);
       setError(errorMessage);
       console.error('File processing error:', error);
     } finally {
@@ -54,15 +109,32 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
     }
   };
 
-
-
-  // Handle file selection
+  // Enhanced file selection handler with iOS-specific logic
   const handleFileSelect = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0) {
+      addDebugLog('No files selected');
+      return;
+    }
 
     const file = files[0];
+    addDebugLog(`File selected: ${file.name} (${file.type})`);
+    
+    // iOS-specific file handling
+    if (deviceInfo?.isIOS) {
+      addDebugLog('iOS device detected - applying iOS-specific handling');
+      
+      // Handle iOS Photos app files
+      if (file.type === '' && file.name.includes('.')) {
+        addDebugLog('iOS Photos app file detected - attempting to determine type');
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        if (extension === 'heic' || extension === 'heif') {
+          addDebugLog('HEIC/HEIF file detected from iOS Photos');
+        }
+      }
+    }
+
     processFile(file);
-  }, []);
+  }, [deviceInfo, processFile, addDebugLog]);
 
   // Handle drag and drop
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -78,28 +150,43 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    addDebugLog('File dropped via drag & drop');
     handleFileSelect(e.dataTransfer.files);
-  }, [handleFileSelect]);
+  }, [handleFileSelect, addDebugLog]);
 
-  // Handle click upload
+  // Handle click upload with iOS-specific options
   const handleClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+    addDebugLog('Upload button clicked');
+    
+    if (deviceInfo?.isIOS) {
+      addDebugLog('iOS device - showing file picker');
+      fileInputRef.current?.click();
+    } else {
+      fileInputRef.current?.click();
+    }
+  }, [deviceInfo, addDebugLog]);
+
+
 
   // Handle file input change
   const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    addDebugLog('File input change event triggered');
     handleFileSelect(e.target.files);
-  }, [handleFileSelect]);
+  }, [handleFileSelect, addDebugLog]);
 
   // Remove selected file
   const handleRemove = useCallback(() => {
+    addDebugLog('Removing selected file');
     setSelectedFile(null);
     setPreviewUrl(null);
     setError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, []);
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = '';
+    }
+  }, [addDebugLog]);
 
   // Format file size
   const formatFileSize = (bytes: number): string => {
@@ -112,9 +199,19 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Hidden file input */}
+      {/* Hidden file inputs */}
       <input
         ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileInputChange}
+        className="hidden"
+        disabled={isUploading || isProcessing}
+      />
+      
+      {/* Camera input for iOS */}
+      <input
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
         capture="environment"
@@ -151,18 +248,25 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
                 <div className="flex items-center space-x-2">
                   <Camera className="h-8 w-8 text-gray-400" />
                   <Upload className="h-6 w-6 text-gray-400" />
+                  {deviceInfo?.isIOS && <Smartphone className="h-6 w-6 text-blue-400" />}
                 </div>
                 <div>
                   <p className="text-lg font-medium text-gray-900 mb-1">
                     Upload Screenshot
                   </p>
                   <p className="text-sm text-gray-600 mb-4">
-                    Tap to select from gallery or drag & drop
+                    {deviceInfo?.isIOS 
+                      ? 'Tap to select from Photos or take a photo'
+                      : 'Tap to select from gallery or drag & drop'
+                    }
                   </p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 max-w-sm">
                   <p className="font-medium mb-1">Supported formats:</p>
                   <p>JPEG, PNG, HEIC (iPhone) • Max {maxSizeMB}MB</p>
+                  {deviceInfo?.isIOS && (
+                    <p className="text-blue-600 mt-1">✓ iOS Photos app compatible</p>
+                  )}
                 </div>
               </div>
             </>
@@ -236,6 +340,20 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
               <p className="text-sm font-medium text-blue-800">Processing Image</p>
               <p className="text-xs text-blue-600">Converting and optimizing...</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Debug Information (only in development) */}
+      {process.env.NODE_ENV === 'development' && debugInfo.length > 0 && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <h3 className="text-sm font-medium text-gray-800 mb-2">Debug Logs:</h3>
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {debugInfo.map((log, index) => (
+              <p key={index} className="text-xs text-gray-600 font-mono">
+                {log}
+              </p>
+            ))}
           </div>
         </div>
       )}

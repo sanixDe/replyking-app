@@ -16,11 +16,17 @@ export interface ProcessedImage {
   format: string;
 }
 
-// Convert HEIC/HEIF to JPEG
-export const convertHeicToJpeg = async (file: File): Promise<File> => {
-  if (!file.type.includes('heic') && !file.type.includes('heif')) {
+// Enhanced HEIC/HEIF detection and conversion
+export const detectAndConvertHeic = async (file: File): Promise<File> => {
+  // Check if it's a HEIC/HEIF file by extension or MIME type
+  const isHeicByExtension = /\.(heic|heif)$/i.test(file.name);
+  const isHeicByType = file.type.includes('heic') || file.type.includes('heif');
+  
+  if (!isHeicByExtension && !isHeicByType) {
     return file;
   }
+
+  console.log('HEIC/HEIF file detected, converting to JPEG...');
 
   return new Promise((resolve, reject) => {
     const canvas = document.createElement('canvas');
@@ -28,34 +34,74 @@ export const convertHeicToJpeg = async (file: File): Promise<File> => {
     const img = new Image();
 
     img.onload = () => {
-      // Set canvas dimensions
-      canvas.width = img.width;
-      canvas.height = img.height;
+      try {
+        // Set canvas dimensions
+        canvas.width = img.width;
+        canvas.height = img.height;
 
-      // Draw image to canvas
-      ctx?.drawImage(img, 0, 0);
+        // Draw image to canvas
+        ctx?.drawImage(img, 0, 0);
 
-      // Convert to JPEG blob
-      canvas.toBlob((blob) => {
-        if (blob) {
-          // Create new file with JPEG format
-          const newFile = new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
-            type: 'image/jpeg',
-            lastModified: Date.now()
-          });
-          resolve(newFile);
-        } else {
-          reject(new Error('Failed to convert HEIC image'));
-        }
-      }, 'image/jpeg', 0.9);
+        // Convert to JPEG blob with high quality
+        canvas.toBlob((blob) => {
+          if (blob) {
+            // Create new file with JPEG format
+            const newFileName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+            const newFile = new File([blob], newFileName, {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            console.log(`HEIC conversion successful: ${file.name} → ${newFileName}`);
+            resolve(newFile);
+          } else {
+            reject(new Error('Failed to convert HEIC image to JPEG'));
+          }
+        }, 'image/jpeg', 0.9);
+      } catch (error) {
+        reject(new Error(`HEIC conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      }
     };
 
-    img.onerror = () => reject(new Error('Failed to load HEIC image'));
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => {
+      reject(new Error('Failed to load HEIC image for conversion'));
+    };
+
+    // Create object URL and load image
+    const objectUrl = URL.createObjectURL(file);
+    img.src = objectUrl;
+    
+    // Clean up object URL after image loads
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      img.onload = () => {
+        // Set canvas dimensions
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        // Draw image to canvas
+        ctx?.drawImage(img, 0, 0);
+
+        // Convert to JPEG blob with high quality
+        canvas.toBlob((blob) => {
+          if (blob) {
+            // Create new file with JPEG format
+            const newFileName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+            const newFile = new File([blob], newFileName, {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            console.log(`HEIC conversion successful: ${file.name} → ${newFileName}`);
+            resolve(newFile);
+          } else {
+            reject(new Error('Failed to convert HEIC image to JPEG'));
+          }
+        }, 'image/jpeg', 0.9);
+      };
+    };
   });
 };
 
-// Compress image while maintaining aspect ratio
+// Enhanced image compression with better quality control
 export const compressImage = async (
   file: File, 
   options: ImageProcessingOptions = {}
@@ -73,56 +119,130 @@ export const compressImage = async (
     const img = new Image();
 
     img.onload = () => {
-      let { width, height } = img;
+      try {
+        let { width, height } = img;
 
-      // Calculate new dimensions while maintaining aspect ratio
-      if (width > maxWidth || height > maxHeight) {
-        const aspectRatio = width / height;
-        
-        if (width > height) {
-          width = maxWidth;
-          height = width / aspectRatio;
-        } else {
-          height = maxHeight;
-          width = height * aspectRatio;
+        // Calculate new dimensions while maintaining aspect ratio
+        if (width > maxWidth || height > maxHeight) {
+          const aspectRatio = width / height;
+          
+          if (width > height) {
+            width = maxWidth;
+            height = width / aspectRatio;
+          } else {
+            height = maxHeight;
+            width = height * aspectRatio;
+          }
         }
+
+        // Set canvas dimensions
+        canvas.width = width;
+        canvas.height = height;
+
+        // Enable image smoothing for better quality
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+        }
+
+        // Draw and compress
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        // Convert to blob
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const processedFile = new File([blob], file.name, {
+              type: `image/${format}`,
+              lastModified: Date.now()
+            });
+
+            resolve({
+              file: processedFile,
+              originalSize: file.size,
+              processedSize: blob.size,
+              width: Math.round(width),
+              height: Math.round(height),
+              format: `image/${format}`
+            });
+          } else {
+            reject(new Error('Failed to compress image'));
+          }
+        }, `image/${format}`, quality);
+      } catch (error) {
+        reject(new Error(`Image compression failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }
-
-      // Set canvas dimensions
-      canvas.width = width;
-      canvas.height = height;
-
-      // Draw and compress
-      ctx?.drawImage(img, 0, 0, width, height);
-
-      // Convert to blob
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const processedFile = new File([blob], file.name, {
-            type: `image/${format}`,
-            lastModified: Date.now()
-          });
-
-          resolve({
-            file: processedFile,
-            originalSize: file.size,
-            processedSize: blob.size,
-            width: Math.round(width),
-            height: Math.round(height),
-            format: `image/${format}`
-          });
-        } else {
-          reject(new Error('Failed to compress image'));
-        }
-      }, `image/${format}`, quality);
     };
 
-    img.onerror = () => reject(new Error('Failed to load image for compression'));
-    img.src = URL.createObjectURL(file);
+    img.onerror = () => {
+      reject(new Error('Failed to load image for compression'));
+    };
+
+    // Create object URL and load image
+    const objectUrl = URL.createObjectURL(file);
+    img.src = objectUrl;
+    
+    // Clean up object URL after image loads
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+
+          // Calculate new dimensions while maintaining aspect ratio
+          if (width > maxWidth || height > maxHeight) {
+            const aspectRatio = width / height;
+            
+            if (width > height) {
+              width = maxWidth;
+              height = width / aspectRatio;
+            } else {
+              height = maxHeight;
+              width = height * aspectRatio;
+            }
+          }
+
+          // Set canvas dimensions
+          canvas.width = width;
+          canvas.height = height;
+
+          // Enable image smoothing for better quality
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+          }
+
+          // Draw and compress
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          // Convert to blob
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const processedFile = new File([blob], file.name, {
+                type: `image/${format}`,
+                lastModified: Date.now()
+              });
+
+              resolve({
+                file: processedFile,
+                originalSize: file.size,
+                processedSize: blob.size,
+                width: Math.round(width),
+                height: Math.round(height),
+                format: `image/${format}`
+              });
+            } else {
+              reject(new Error('Failed to compress image'));
+            }
+          }, `image/${format}`, quality);
+        } catch (error) {
+          reject(new Error(`Image compression failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        }
+      };
+    };
   });
 };
 
-// Process image for iPhone compatibility
+// Enhanced image processing for iPhone compatibility
 export const processImageForIphone = async (
   file: File,
   maxSizeMB: number = 10
@@ -130,51 +250,96 @@ export const processImageForIphone = async (
   const maxSizeBytes = maxSizeMB * 1024 * 1024;
 
   try {
-    // Convert HEIC if needed
-    let processedFile = await convertHeicToJpeg(file);
+    console.log(`Processing image: ${file.name} (${file.size} bytes)`);
 
-    // Compress if file is too large
+    // First, convert HEIC if needed
+    let processedFile = await detectAndConvertHeic(file);
+    console.log(`After HEIC conversion: ${processedFile.name} (${processedFile.size} bytes)`);
+
+    // If file is still too large, compress it
     if (processedFile.size > maxSizeBytes) {
+      console.log(`File too large (${processedFile.size} bytes), compressing...`);
       const result = await compressImage(processedFile, {
         maxWidth: 1920,
         maxHeight: 1920,
         quality: 0.8,
         format: 'jpeg'
       });
+      console.log(`Compression complete: ${result.processedSize} bytes`);
       return result;
     }
 
-    // Return original file if no processing needed
+    // Get dimensions for the processed file
+    const dimensions = await getImageDimensions(processedFile);
+
+    // Return processed file if no compression needed
     return {
       file: processedFile,
       originalSize: file.size,
       processedSize: processedFile.size,
-      width: 0, // Will be set when image loads
-      height: 0,
+      width: dimensions.width,
+      height: dimensions.height,
       format: processedFile.type
     };
   } catch (error) {
+    console.error('Image processing error:', error);
     throw new Error(`Failed to process image: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
 
-// Get image dimensions
+// Get image dimensions with better error handling
 export const getImageDimensions = (file: File): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    
     img.onload = () => {
-      resolve({ width: img.width, height: img.height });
+      try {
+        resolve({ width: img.width, height: img.height });
+      } catch (error) {
+        reject(new Error(`Failed to get image dimensions: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      }
     };
-    img.onerror = () => reject(new Error('Failed to get image dimensions'));
-    img.src = URL.createObjectURL(file);
+    
+    img.onerror = () => {
+      reject(new Error('Failed to load image for dimension calculation'));
+    };
+
+    // Create object URL and load image
+    const objectUrl = URL.createObjectURL(file);
+    img.src = objectUrl;
+    
+    // Clean up object URL after image loads
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      img.onload = () => {
+        try {
+          resolve({ width: img.width, height: img.height });
+        } catch (error) {
+          reject(new Error(`Failed to get image dimensions: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        }
+      };
+    };
   });
 };
 
-// Validate image file for iPhone
+// Enhanced validation for iPhone images
 export const validateIphoneImage = (file: File): { isValid: boolean; error?: string } => {
-  // Check file type
+  console.log(`Validating file: ${file.name} (${file.type}, ${file.size} bytes)`);
+
+  // Check if file exists
+  if (!file) {
+    return { isValid: false, error: 'No file provided' };
+  }
+
+  // Check file type (including HEIC support)
   const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/heic', 'image/heif'];
-  if (!allowedTypes.includes(file.type)) {
+  const isHeicByExtension = /\.(heic|heif)$/i.test(file.name);
+  
+  // Handle iOS Photos app files that might have empty type
+  if (file.type === '' && isHeicByExtension) {
+    console.log('iOS Photos app HEIC file detected');
+    // Allow these files as they will be converted
+  } else if (!allowedTypes.includes(file.type) && !isHeicByExtension) {
     return {
       isValid: false,
       error: 'Please select a JPEG, PNG, or HEIC image file'
@@ -190,17 +355,33 @@ export const validateIphoneImage = (file: File): { isValid: boolean; error?: str
     };
   }
 
+  // For now, return valid if basic checks pass
+  // The async validation can be added later if needed
   return { isValid: true };
 };
 
-// Create image preview URL
+// Enhanced image preview creation
 export const createImagePreview = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    
     reader.onload = (e) => {
-      resolve(e.target?.result as string);
+      try {
+        const result = e.target?.result as string;
+        if (result) {
+          resolve(result);
+        } else {
+          reject(new Error('Failed to create image preview'));
+        }
+      } catch (error) {
+        reject(new Error(`Preview creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      }
     };
-    reader.onerror = () => reject(new Error('Failed to create image preview'));
+    
+    reader.onerror = () => {
+      reject(new Error('Failed to read file for preview'));
+    };
+    
     reader.readAsDataURL(file);
   });
 }; 

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { MessageSquare, RefreshCw, AlertCircle, Settings, HelpCircle } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import { ReplyTone, AnalysisResult } from './types';
 import { geminiService } from './services/geminiService';
 import { analyticsService } from './services/analyticsService';
@@ -14,8 +15,6 @@ import ToneSelector from './components/ToneSelector';
 import ReplyResults from './components/ReplyResults';
 import InstallPrompt from './components/InstallPrompt';
 import NetworkStatus from './components/NetworkStatus';
-import LoadingSpinner from './components/LoadingSpinner';
-import TouchButton from './components/TouchButton';
 import Onboarding from './components/Onboarding';
 
 function App() {
@@ -30,7 +29,6 @@ function App() {
   const [analysisStartTime, setAnalysisStartTime] = useState<number | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [isFirstVisit, setIsFirstVisit] = useState(false);
 
   // Toast notifications
   const { toasts, removeToast, success, error: showError } = useToast();
@@ -44,7 +42,6 @@ function App() {
     // Check if this is the first visit
     const hasVisited = cacheService.getPreference('has_visited', false);
     if (!hasVisited) {
-      setIsFirstVisit(true);
       setShowOnboarding(true);
       cacheService.setPreference('has_visited', true);
     }
@@ -95,9 +92,15 @@ function App() {
     setError(null);
     setAnalysisResult(null);
     
-    // Track analytics
+    // Track analytics with enhanced data
     analyticsService.trackImageUpload();
     enhancedAnalyticsService.trackUserInteraction('image_upload', 'ImageUpload');
+    enhancedAnalyticsService.trackEvent('image_upload_details', {
+      fileType: file.type,
+      fileSize: file.size,
+      fileName: file.name,
+      isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent)
+    });
     success('Screenshot uploaded successfully!');
   }, [success]);
 
@@ -445,6 +448,7 @@ function App() {
           onClose={() => setShowOnboarding(false)}
         />
       </div>
+      <Analytics />
     </ErrorBoundary>
   );
 }
